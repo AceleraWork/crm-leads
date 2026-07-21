@@ -17,9 +17,8 @@
           <h1>CRM de Leads</h1>
         </div>
         <div class="topbar-actions">
-          <button class="ghost-btn" id="clearDemoBtn" title="Borrar contactos de prueba">
-            <i data-lucide="eraser"></i>
-            Borrar demo
+          <button class="icon-btn" id="tutorialBtn" title="Tutorial y modo demo">
+            <i data-lucide="lightbulb"></i>
           </button>
           <button class="icon-btn" id="syncBtn" title="Sincronizar CSV / Google Sheet">
             <i data-lucide="refresh-cw"></i>
@@ -43,6 +42,10 @@
         <button class="tab active" data-view="pipeline"><i data-lucide="columns-3"></i> Pipeline</button>
         <button class="tab" data-view="dashboard"><i data-lucide="bar-chart-3"></i> Métricas</button>
         <button class="tab" data-view="followup"><i data-lucide="calendar-clock"></i> Hoy</button>
+        <button class="ghost-btn" id="pushStagesBtn" title="Reintentar el guardado del estado de todos los leads en el Sheet, por si algún envío automático falló">
+          <i data-lucide="save"></i>
+          Guardar
+        </button>
       </nav>
 
       <main>
@@ -151,7 +154,6 @@
           <textarea id="csvText" rows="8" placeholder="id,created_time,ad_name,..."></textarea>
         </label>
         <footer>
-          <button class="ghost-btn" id="loadSample" type="button">Cargar demo</button>
           <button class="primary-btn" id="saveSource" type="button">Importar leads</button>
         </footer>
       </form>
@@ -171,5 +173,42 @@
         </footer>
       </form>
     </dialog>
+
+    <div class="onboarding-overlay hidden" id="onboardingOverlay" aria-hidden="true">
+      <button class="icon-btn onboarding-close" id="onboardingClose" title="Cerrar"><i data-lucide="x"></i></button>
+      <div class="onboarding-stage" id="onboardingStage">
+        <article class="onboarding-slide" data-index="0">
+          <i data-lucide="columns-3" class="onboarding-icon"></i>
+          <h2>Bienvenido al Pipeline</h2>
+          <p>Cada lead es una tarjeta. Arrástrala entre columnas para moverla de etapa: Nuevo, Contactado, No respondió, MQL... hasta Cliente o Perdido.</p>
+        </article>
+        <article class="onboarding-slide" data-index="1">
+          <i data-lucide="user-round" class="onboarding-icon"></i>
+          <h2>Abre la ficha del lead</h2>
+          <p>Haz clic en una tarjeta para ver su WhatsApp, campaña, respuestas de calificación, agregar notas y programar la próxima acción.</p>
+        </article>
+        <article class="onboarding-slide" data-index="2">
+          <i data-lucide="refresh-cw" class="onboarding-icon"></i>
+          <h2>Todo se sincroniza solo</h2>
+          <p>Los leads nuevos llegan automáticamente desde el Google Sheet compartido cada 2 minutos. Al mover un lead de etapa, el cambio se guarda para que lo vea todo el equipo.</p>
+        </article>
+        <article class="onboarding-slide" data-index="3">
+          <i data-lucide="bar-chart-3" class="onboarding-icon"></i>
+          <h2>Revisa las métricas</h2>
+          <p>La pestaña Métricas muestra el funnel completo, tiempos de respuesta y comparaciones contra tus benchmarks de conversión.</p>
+        </article>
+        <article class="onboarding-slide" data-index="4">
+          <i data-lucide="calendar-clock" class="onboarding-icon"></i>
+          <h2>No pierdas el seguimiento</h2>
+          <p>La pestaña Hoy junta todas las próximas acciones vencidas o programadas para hoy, para que no se te escape ningún lead.</p>
+          <div class="onboarding-final-actions">
+            <button class="ghost-btn" id="onboardingCloseBtn" type="button">Cerrar</button>
+            <button class="primary-btn" id="onboardingTryDemo" type="button"><i data-lucide="play"></i> Probar demo</button>
+          </div>
+        </article>
+      </div>
+      <div class="onboarding-dots" id="onboardingDots"></div>
+      <p class="onboarding-hint">Arrastra o usa las flechas del teclado ← →</p>
+    </div>
   </body>
 </html>

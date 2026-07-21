@@ -4,7 +4,7 @@ const LOST_REASONS = ["No contestó", "No calificado", "Sin plata", "No le inter
 const META_COLUMNS_TO_IGNORE = new Set(["is_organic", "platform", "form_id", "form_name", "ad_id", "adset_id", "campaign_id", "lead_status"]);
 const STORAGE_KEY = "alta-crm-state-v1";
 const BENCHMARK_KEY = "alta-crm-benchmarks-v1";
-const DEFAULT_SOURCE_URL = "https://docs.google.com/spreadsheets/d/1e_czwxsoT-g6MCkDywN2jw-bblDYk7xeVREAvX0VLFY/edit?usp=sharing";
+const DEFAULT_SOURCE_URL = "https://script.google.com/macros/s/AKfycbwAm67x1goYsi6K5Vx0H73zRAdnuQU0nxw7LTWtAfY7OtRtTfgdhP6bKcCAEJ1p4Nfb/exec";
 const AUTO_SYNC_MS = 2 * 60 * 1000;
 const USER = "Luciano";
 
@@ -27,13 +27,9 @@ let funnelChart;
 const $ = (selector) => document.querySelector(selector);
 
 document.addEventListener("DOMContentLoaded", () => {
-  if (!state.leads.length) {
-    state.leads = buildSampleLeads();
-    saveState();
-  }
-
   bindEvents();
   render();
+  updateTutorialButton();
   syncFromSavedSource(true);
   setInterval(renderTimeSensitive, 60000);
   setInterval(() => syncFromSavedSource(true), AUTO_SYNC_MS);
@@ -56,14 +52,16 @@ function bindEvents() {
 
   $("#importBtn").addEventListener("click", () => $("#importDialog").showModal());
   $("#syncBtn").addEventListener("click", syncFromSavedSource);
+  $("#pushStagesBtn").addEventListener("click", pushAllStagesToSheet);
   $("#saveSource").addEventListener("click", importFromDialog);
-  $("#clearDemoBtn").addEventListener("click", clearDemoLeads);
-  $("#loadSample").addEventListener("click", () => {
-    state.leads = buildSampleLeads();
-    saveState();
-    $("#importDialog").close();
-    render();
+  $("#tutorialBtn").addEventListener("click", () => {
+    if (state.demoMode) {
+      exitDemoMode();
+    } else {
+      openOnboarding();
+    }
   });
+  bindOnboardingEvents();
   $("#closeDrawer").addEventListener("click", closeDrawer);
   $("#drawerBackdrop").addEventListener("click", closeDrawer);
   $("#prevLead").addEventListener("click", () => navigateLead(-1));
@@ -184,9 +182,17 @@ function requestStageMove(id, stage) {
 function moveLead(id, stage) {
   const lead = state.leads.find((item) => item.id === id);
   if (!lead || lead.stage === stage) return;
+  applyStage(lead, stage, USER);
+  saveState();
+  render();
+  if (selectedLeadId === id) renderDrawer(lead);
+  pushStageToSheet(lead);
+}
+
+function applyStage(lead, stage, by) {
   const previous = lead.stage;
   lead.stage = stage;
-  lead.transitions.unshift({ from: previous, to: stage, at: new Date().toISOString(), by: USER });
+  lead.transitions.unshift({ from: previous, to: stage, at: new Date().toISOString(), by });
   if (previous === "Nuevo" && stage === "Contactado" && !lead.first_contacted_at) {
     lead.first_contacted_at = new Date().toISOString();
     lead.response_minutes = diffMinutes(lead.created_time, lead.first_contacted_at);
@@ -194,9 +200,53 @@ function moveLead(id, stage) {
   if (stage === "No respondió" && !lead.contact_attempts) {
     lead.contact_attempts = 1;
   }
-  saveState();
-  render();
-  if (selectedLeadId === id) renderDrawer(lead);
+}
+
+function isAppsScriptUrl(url) {
+  return /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(String(url || ""));
+}
+
+function pushStageToSheet(lead) {
+  if (state.demoMode || !isAppsScriptUrl(state.sourceUrl)) return;
+  fetch(state.sourceUrl, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ id: lead.id, estado_crm: lead.stage }),
+  }).catch(() => {});
+}
+
+async function pushAllStagesToSheet() {
+  if (state.demoMode) return;
+  const button = $("#pushStagesBtn");
+  const originalLabel = button.innerHTML;
+  if (!isAppsScriptUrl(state.sourceUrl)) {
+    setPushStagesStatus(button, originalLabel, "Conecta un Apps Script en Fuente de datos");
+    return;
+  }
+  button.disabled = true;
+  button.innerHTML = `<i data-lucide="loader"></i> Guardando...`;
+  if (window.lucide) window.lucide.createIcons();
+  const updates = state.leads.map((lead) => ({ id: lead.id, estado_crm: lead.stage }));
+  try {
+    const response = await fetch(state.sourceUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ updates }),
+    });
+    const result = await response.json();
+    setPushStagesStatus(button, originalLabel, result.ok ? `Guardado: ${result.updated}/${result.requested}` : `No se pudo: ${result.error}`);
+  } catch (error) {
+    setPushStagesStatus(button, originalLabel, "No se pudo guardar");
+  }
+}
+
+function setPushStagesStatus(button, originalLabel, message) {
+  button.disabled = false;
+  button.textContent = message;
+  setTimeout(() => {
+    button.innerHTML = originalLabel;
+    if (window.lucide) window.lucide.createIcons();
+  }, 3000);
 }
 
 function openLead(id) {
@@ -329,16 +379,208 @@ function deleteLead(id) {
   render();
 }
 
-function clearDemoLeads() {
-  const demoIds = new Set(buildSampleLeads().map((lead) => lead.id));
-  const found = state.leads.filter((lead) => demoIds.has(lead.id)).length;
-  if (!found) return;
-  const confirmed = confirm(`¿Borrar ${found} contactos de prueba?`);
-  if (!confirmed) return;
-  state.deletedLeadIds = [...new Set([...(state.deletedLeadIds || []), ...demoIds])];
-  state.leads = state.leads.filter((lead) => !demoIds.has(lead.id));
+function enterDemoMode() {
+  state.preDemoLeads = state.leads;
+  state.preDemoDeletedLeadIds = state.deletedLeadIds;
+  state.leads = buildSampleLeads();
+  state.deletedLeadIds = [];
+  state.demoMode = true;
   saveState();
   render();
+  updateTutorialButton();
+}
+
+function exitDemoMode() {
+  if (!state.demoMode) return;
+  state.leads = state.preDemoLeads || [];
+  state.deletedLeadIds = state.preDemoDeletedLeadIds || [];
+  delete state.preDemoLeads;
+  delete state.preDemoDeletedLeadIds;
+  state.demoMode = false;
+  purgeDemoLeads();
+  saveState();
+  render();
+  updateTutorialButton();
+  syncFromSavedSource(true);
+}
+
+function purgeDemoLeads() {
+  const demoIds = new Set(buildSampleLeads().map((lead) => lead.id));
+  const before = state.leads.length;
+  state.leads = state.leads.filter((lead) => !demoIds.has(lead.id));
+  if (state.leads.length !== before) {
+    state.deletedLeadIds = [...new Set([...(state.deletedLeadIds || []), ...demoIds])];
+  }
+}
+
+function updateTutorialButton() {
+  const button = $("#tutorialBtn");
+  if (state.demoMode) {
+    button.className = "ghost-btn";
+    button.title = "Salir del modo demo y volver a tus leads reales";
+    button.innerHTML = `<i data-lucide="log-out"></i> Cerrar demo`;
+  } else {
+    button.className = "icon-btn";
+    button.title = "Tutorial y modo demo";
+    button.innerHTML = `<i data-lucide="lightbulb"></i>`;
+  }
+  if (window.lucide) window.lucide.createIcons();
+}
+
+let onboardingIndex = 0;
+let onboardingSlideEls = [];
+let onboardingDragState = null;
+let onboardingTransitioning = false;
+
+function bindOnboardingEvents() {
+  onboardingSlideEls = Array.from(document.querySelectorAll(".onboarding-slide"));
+  const dotsContainer = $("#onboardingDots");
+  onboardingSlideEls.forEach((_, index) => {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "onboarding-dot";
+    dot.setAttribute("aria-label", `Ir al paso ${index + 1}`);
+    dot.addEventListener("click", () => flipToSlide(index));
+    dotsContainer.append(dot);
+  });
+
+  $("#onboardingClose").addEventListener("click", closeOnboarding);
+  $("#onboardingCloseBtn").addEventListener("click", closeOnboarding);
+  $("#onboardingTryDemo").addEventListener("click", () => {
+    closeOnboarding();
+    enterDemoMode();
+  });
+
+  const stage = $("#onboardingStage");
+  stage.addEventListener("mousedown", onboardingDragStart);
+  window.addEventListener("mousemove", onboardingDragMove);
+  window.addEventListener("mouseup", onboardingDragEnd);
+  document.addEventListener("keydown", onboardingKeydown);
+}
+
+function openOnboarding() {
+  onboardingIndex = 0;
+  onboardingSlideEls.forEach((slide, index) => {
+    slide.style.transition = "none";
+    slide.style.transform = "rotateY(0deg)";
+    slide.style.zIndex = String(onboardingSlideEls.length - index);
+    requestAnimationFrame(() => {
+      slide.style.transition = "";
+    });
+  });
+  updateOnboardingDots();
+  $("#onboardingOverlay").classList.remove("hidden");
+  $("#onboardingOverlay").setAttribute("aria-hidden", "false");
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function closeOnboarding() {
+  $("#onboardingOverlay").classList.add("hidden");
+  $("#onboardingOverlay").setAttribute("aria-hidden", "true");
+  if (!state.demoMode) {
+    purgeDemoLeads();
+    saveState();
+    render();
+  }
+}
+
+function updateOnboardingDots() {
+  document.querySelectorAll(".onboarding-dot").forEach((dot, index) => {
+    dot.classList.toggle("active", index === onboardingIndex);
+  });
+}
+
+function flipToSlide(targetIndex) {
+  if (onboardingTransitioning) return;
+  if (targetIndex === onboardingIndex || targetIndex < 0 || targetIndex >= onboardingSlideEls.length) return;
+  onboardingTransitioning = true;
+  const direction = targetIndex > onboardingIndex ? 1 : -1;
+  const slide = direction === 1 ? onboardingSlideEls[onboardingIndex] : onboardingSlideEls[targetIndex];
+  slide.style.transition = "";
+  slide.style.zIndex = String(onboardingSlideEls.length + 1);
+  requestAnimationFrame(() => {
+    slide.style.transform = direction === 1 ? "rotateY(-180deg)" : "rotateY(0deg)";
+  });
+  onboardingIndex = targetIndex;
+  updateOnboardingDots();
+  setTimeout(() => {
+    resetOnboardingLayering();
+    onboardingTransitioning = false;
+  }, 1150);
+}
+
+function resetOnboardingLayering() {
+  onboardingSlideEls.forEach((slide, index) => {
+    slide.style.zIndex = index < onboardingIndex ? String(index) : String(onboardingSlideEls.length - index);
+  });
+}
+
+function onboardingKeydown(event) {
+  if ($("#onboardingOverlay").classList.contains("hidden")) return;
+  if (event.repeat) return;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    event.preventDefault();
+    flipToSlide(onboardingIndex + 1);
+  }
+  if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    event.preventDefault();
+    flipToSlide(onboardingIndex - 1);
+  }
+  if (event.key === "Escape") closeOnboarding();
+}
+
+function onboardingDragStart(event) {
+  if ($("#onboardingOverlay").classList.contains("hidden") || onboardingTransitioning) return;
+  const rect = $("#onboardingStage").getBoundingClientRect();
+  onboardingDragState = { startX: event.clientX, width: rect.width, direction: 0, slide: null, progress: 0 };
+}
+
+function onboardingDragMove(event) {
+  if (!onboardingDragState) return;
+  const dx = event.clientX - onboardingDragState.startX;
+  if (onboardingDragState.direction === 0) {
+    if (Math.abs(dx) < 6) return;
+    if (dx < 0 && onboardingIndex < onboardingSlideEls.length - 1) {
+      onboardingDragState.direction = 1;
+      onboardingDragState.slide = onboardingSlideEls[onboardingIndex];
+    } else if (dx > 0 && onboardingIndex > 0) {
+      onboardingDragState.direction = -1;
+      onboardingDragState.slide = onboardingSlideEls[onboardingIndex - 1];
+    } else {
+      onboardingDragState.direction = null;
+      return;
+    }
+    onboardingDragState.slide.style.transition = "none";
+    onboardingDragState.slide.style.zIndex = String(onboardingSlideEls.length + 1);
+    $("#onboardingStage").classList.add("dragging");
+  }
+  if (!onboardingDragState.slide) return;
+  const progress = Math.min(1, Math.abs(dx) / (onboardingDragState.width * 0.85));
+  onboardingDragState.progress = progress;
+  const angle = onboardingDragState.direction === 1 ? -180 * progress : -180 * (1 - progress);
+  onboardingDragState.slide.style.transform = `rotateY(${angle}deg)`;
+}
+
+function onboardingDragEnd() {
+  if (!onboardingDragState) return;
+  const { slide, direction, progress } = onboardingDragState;
+  $("#onboardingStage").classList.remove("dragging");
+  if (slide) {
+    slide.style.transition = "";
+    onboardingTransitioning = true;
+    if (progress > 0.32) {
+      onboardingIndex = direction === 1 ? onboardingIndex + 1 : onboardingIndex - 1;
+      slide.style.transform = direction === 1 ? "rotateY(-180deg)" : "rotateY(0deg)";
+      updateOnboardingDots();
+    } else {
+      slide.style.transform = direction === 1 ? "rotateY(0deg)" : "rotateY(-180deg)";
+    }
+    setTimeout(() => {
+      resetOnboardingLayering();
+      onboardingTransitioning = false;
+    }, 1150);
+  }
+  onboardingDragState = null;
 }
 
 function navigateLead(direction) {
@@ -449,38 +691,46 @@ function renderFollowups() {
 async function importFromDialog() {
   const url = $("#csvUrl").value.trim();
   const pasted = $("#csvText").value.trim();
-  let csv = pasted;
+  let rows;
   if (url) {
-    const response = await fetch(sourceFetchUrl(url));
-    csv = await response.text();
+    rows = await fetchLeadsFromSource(url);
     state.sourceUrl = normalizeSheetUrl(url);
+  } else if (pasted) {
+    rows = parseCsv(pasted);
   }
-  if (!csv) return;
-  mergeLeads(parseCsv(csv));
+  if (!rows || !rows.length) return;
+  mergeLeads(rows);
   saveState();
   $("#importDialog").close();
   render();
 }
 
 async function syncFromSavedSource(silent = false) {
+  if (state.demoMode) return;
   if (!state.sourceUrl) {
     if (!silent) $("#importDialog").showModal();
     return;
   }
   try {
-    const response = await fetch(sourceFetchUrl(state.sourceUrl), { cache: "no-store" });
-    const csv = await response.text();
-    mergeLeads(parseCsv(csv));
+    const rows = await fetchLeadsFromSource(state.sourceUrl);
+    mergeLeads(rows);
     state.lastSyncAt = new Date().toISOString();
     saveState();
     render();
     $("#criticalHint").textContent = `Sincronizado: ${formatDate(state.lastSyncAt)}. Se actualiza cada 2 min.`;
   } catch (error) {
-    if (!silent) alert("No pude sincronizar el Google Sheet. Revisa que el servidor local sea server.py y que el Sheet sea accesible.");
+    if (!silent) alert("No pude sincronizar la fuente de datos configurada.");
   }
 }
 
+async function fetchLeadsFromSource(sourceUrl) {
+  const response = await fetch(sourceFetchUrl(sourceUrl), { cache: "no-store" });
+  if (isAppsScriptUrl(sourceUrl)) return response.json();
+  return parseCsv(await response.text());
+}
+
 function normalizeSheetUrl(url) {
+  if (isAppsScriptUrl(url)) return url;
   const match = String(url).match(/docs\.google\.com\/spreadsheets\/d\/([^/]+)/);
   if (!match) return url;
   const gid = new URL(url).searchParams.get("gid");
@@ -489,6 +739,7 @@ function normalizeSheetUrl(url) {
 
 function sourceFetchUrl(url) {
   const normalized = normalizeSheetUrl(url);
+  if (isAppsScriptUrl(normalized)) return normalized;
   if (normalized.includes("docs.google.com") && ["localhost", "127.0.0.1"].includes(location.hostname)) {
     return `/sheet.csv?url=${encodeURIComponent(normalized)}`;
   }
@@ -503,8 +754,17 @@ function mergeLeads(rows) {
     Object.entries(row).forEach(([key, value]) => {
       if (!META_COLUMNS_TO_IGNORE.has(key)) clean[key] = value;
     });
-    if (!clean.id || existing.has(clean.id) || deleted.has(clean.id)) return;
-    state.leads.push(normalizeLead(clean));
+    if (!clean.id) return;
+    const sheetStage = STAGES.includes(clean.estado_crm) ? clean.estado_crm : "";
+    const current = existing.get(clean.id);
+    if (current) {
+      if (sheetStage && sheetStage !== current.stage) applyStage(current, sheetStage, "Sheet");
+      return;
+    }
+    if (deleted.has(clean.id)) return;
+    const lead = normalizeLead(clean);
+    if (sheetStage) lead.stage = sheetStage;
+    state.leads.push(lead);
   });
 }
 
