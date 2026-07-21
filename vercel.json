@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/sheet.csv", "destination": "/api/sheet" }
+  ]
+}
