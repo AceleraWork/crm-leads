@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CRM de Leads | Alta Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@latest" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Alta Studio</p>
+          <h1>CRM de Leads</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-btn" id="clearDemoBtn" title="Borrar contactos de prueba">
+            <i data-lucide="eraser"></i>
+            Borrar demo
+          </button>
+          <button class="icon-btn" id="syncBtn" title="Sincronizar CSV / Google Sheet">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+          <button class="primary-btn" id="importBtn">
+            <i data-lucide="table-properties"></i>
+            Fuente de datos
+          </button>
+        </div>
+      </header>
+
+      <section class="critical-strip" aria-live="polite">
+        <div class="critical-count" id="criticalCount">0</div>
+        <div>
+          <strong>leads sin contactar hace más de 1 hora</strong>
+          <span id="criticalHint">El contador se actualiza en tiempo real.</span>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="Vistas">
+        <button class="tab active" data-view="pipeline"><i data-lucide="columns-3"></i> Pipeline</button>
+        <button class="tab" data-view="dashboard"><i data-lucide="bar-chart-3"></i> Métricas</button>
+        <button class="tab" data-view="followup"><i data-lucide="calendar-clock"></i> Hoy</button>
+      </nav>
+
+      <main>
+        <section class="view active" id="pipelineView">
+          <div class="filters">
+            <label>
+              Campaña
+              <select id="campaignFilter"></select>
+            </label>
+            <label>
+              Oferta
+              <select id="offerFilter">
+                <option value="all">Todas</option>
+                <option>Oferta Curso AI</option>
+                <option>Oferta AI Agency</option>
+                <option>Ambas</option>
+                <option>Sin definir</option>
+              </select>
+            </label>
+            <label>
+              Buscar
+              <input id="searchInput" type="search" placeholder="Nombre, WhatsApp, campaña..." />
+            </label>
+          </div>
+          <div class="kanban" id="kanban"></div>
+        </section>
+
+        <section class="view" id="dashboardView">
+          <div class="dashboard-grid">
+            <section class="metric-panel">
+              <div class="section-title">
+                <h2>Funnel</h2>
+                <button class="ghost-btn" id="benchmarksBtn"><i data-lucide="sliders-horizontal"></i> Benchmarks</button>
+              </div>
+              <canvas id="funnelChart" height="170"></canvas>
+              <div class="funnel-table" id="funnelTable"></div>
+            </section>
+
+            <section class="metric-panel">
+              <h2>Respuesta</h2>
+              <div class="response-metrics">
+                <div>
+                  <span>Promedio</span>
+                  <strong id="avgResponse">-</strong>
+                </div>
+                <div>
+                  <span>Mediana</span>
+                  <strong id="medianResponse">-</strong>
+                </div>
+              </div>
+              <div class="dashboard-filters">
+                <label>Desde <input type="date" id="dateFrom" /></label>
+                <label>Hasta <input type="date" id="dateTo" /></label>
+                <label>Campaña <select id="dashboardCampaign"></select></label>
+                <label>Oferta <select id="dashboardOffer"></select></label>
+              </div>
+            </section>
+
+            <section class="metric-panel wide">
+              <h2>Interés cruzado hacia AI Agency</h2>
+              <div class="segment-table" id="agencySegment"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="followupView">
+          <div class="section-title">
+            <h2>Seguimiento de hoy</h2>
+            <span id="followupCount"></span>
+          </div>
+          <div class="followup-list" id="followupList"></div>
+        </section>
+      </main>
+    </div>
+
+    <aside class="lead-drawer" id="leadDrawer" aria-hidden="true">
+      <div class="drawer-backdrop" id="drawerBackdrop"></div>
+      <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <header class="drawer-header">
+          <button class="icon-btn" id="prevLead" title="Anterior"><i data-lucide="chevron-left"></i></button>
+          <div>
+            <p class="eyebrow" id="drawerStage">Lead</p>
+            <h2 id="drawerTitle"></h2>
+          </div>
+          <button class="icon-btn" id="nextLead" title="Siguiente"><i data-lucide="chevron-right"></i></button>
+          <button class="icon-btn" id="closeDrawer" title="Cerrar"><i data-lucide="x"></i></button>
+        </header>
+
+        <div class="drawer-content" id="drawerContent"></div>
+      </section>
+    </aside>
+
+    <dialog id="importDialog">
+      <form method="dialog" class="dialog-form">
+        <header>
+          <h2>Fuente de datos</h2>
+          <button class="icon-btn" value="cancel" title="Cerrar"><i data-lucide="x"></i></button>
+        </header>
+        <p>Usa una URL CSV de Google Sheets publicado o pega CSV exportado desde Meta Lead Ads. El pipeline y notas se guardan localmente sin modificar el Sheet.</p>
+        <label>
+          URL de Google Sheet o CSV
+          <input id="csvUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing" />
+        </label>
+        <label>
+          CSV pegado
+          <textarea id="csvText" rows="8" placeholder="id,created_time,ad_name,..."></textarea>
+        </label>
+        <footer>
+          <button class="ghost-btn" id="loadSample" type="button">Cargar demo</button>
+          <button class="primary-btn" id="saveSource" type="button">Importar leads</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="lostDialog">
+      <form method="dialog" class="dialog-form">
+        <header>
+          <h2>Marcar como perdido</h2>
+          <button class="icon-btn" value="cancel" title="Cerrar"><i data-lucide="x"></i></button>
+        </header>
+        <div class="reason-grid" id="reasonGrid"></div>
+        <input id="otherReason" class="hidden" maxlength="80" placeholder="Motivo corto" />
+        <footer>
+          <button class="ghost-btn" value="cancel">Cancelar</button>
+          <button class="danger-btn" id="confirmLost" type="button">Confirmar</button>
+        </footer>
+      </form>
+    </dialog>
+  </body>
+</html>
